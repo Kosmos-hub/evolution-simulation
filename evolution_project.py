@@ -202,11 +202,11 @@ ax_w1.set_title("Input→Hidden Weights"); fig.colorbar(im_w1, ax=ax_w1, fractio
 im_w2 = ax_w2.imshow(np.zeros((HIDDEN_NEURONS,len(ENVIRONMENTS[0]["target"]))), vmin=-3, vmax=3, cmap="coolwarm")
 ax_w2.set_title("Hidden→Output Weights"); fig.colorbar(im_w2, ax=ax_w2, fraction=0.046, pad=0.04)
 
-# Slider (wider because we shifted layout)
+# Slider 
 ax_slider = plt.axes([0.22, 0.08, 0.58, 0.04])
 slider = Slider(ax_slider, 'Generation', 0, GENERATIONS-1, valinit=GENERATIONS-1, valstep=1)
 
-# ===== Style state (reuse your existing dict if present) =====
+# ===== Style state  =====
 style_state = {"thin": False, "markers": False, "trail": False}
 
 def apply_style_to_lines():
