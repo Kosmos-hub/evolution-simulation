@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'Segoe UI Emoji'
 from matplotlib.widgets import Slider, Button, CheckButtons
+from matplotlib.colors import to_rgb
+
 
 # =========================
 # Configurable parameters ^w^
@@ -90,10 +92,13 @@ class Brain:
 def fitness(brain):
     score = 0
     for _ in range(ENV_TESTS):
-        env = random.choice(ENVIRONMENTS)
-        varied_inputs = [max(0, min(1, i + random.uniform(-0.5,0.5))) for i in env["inputs"]]
+        # pick a random point in time for smooth environment blending
+        g = np.random.uniform(0, GENERATIONS - 1)
+        e = env_at_generation(g)
+        # add small random noise to inputs
+        varied_inputs = [max(0, min(1, x + random.uniform(-0.1, 0.1))) for x in e["inputs"]]
         output, _ = brain.forward(varied_inputs)
-        score += 1 - np.mean([abs(o - t) for o, t in zip(output, env["target"])])
+        score += 1 - np.mean([abs(o - t) for o, t in zip(output, e["target"])])
     return score / ENV_TESTS
 
 def tournament_select(population, fitnesses):
@@ -103,6 +108,40 @@ def tournament_select(population, fitnesses):
         if f > best_fit:
             best_fit = f; best = population[idx]
     return best
+
+# =========================
+# Smooth environment blending (cosine)
+# =========================
+def cosine_blend(t):
+    """t in [0,1] → smoothstep-ish blend (0→1 with soft ends)."""
+    return 0.5 - 0.5 * np.cos(np.pi * np.clip(t, 0, 1))
+
+def env_at_generation(gen):
+    """
+    Return a blended environment dict for generation 'gen':
+    inputs/targets are a cosine blend of the active span and the next span.
+    """
+    # find which span gen is in
+    total = 0
+    for i, (start, end, base_env) in enumerate(env_spans):
+        if start <= gen < end:
+            # blend factor in this span
+            span_len = max(1, end - start)
+            local_t = (gen - start) / span_len  # 0..1 in this span
+            # blend toward the NEXT span (loops around)
+            next_env = env_spans[(i + 1) % len(env_spans)][2]
+            w = cosine_blend(local_t)
+            # blend inputs/targets elementwise
+            blend_inputs = [
+                (1 - w) * base_env["inputs"][k] + w * next_env["inputs"][k] for k in range(3)
+            ]
+            blend_targets = [
+                (1 - w) * base_env["target"][k] + w * next_env["target"][k] for k in range(len(base_env["target"]))
+            ]
+            return {"name": base_env["name"], "inputs": blend_inputs, "target": blend_targets, "w": w, "next_name": next_env["name"], "span": (start, end)}
+    # fallback
+    return {"name": ENVIRONMENTS[0]["name"], "inputs": ENVIRONMENTS[0]["inputs"], "target": ENVIRONMENTS[0]["target"], "w": 0.0, "next_name": ENVIRONMENTS[1]["name"], "span": (0, GENERATIONS)}
+
 
 # =========================
 # Initialize & evolve
@@ -117,20 +156,29 @@ best_w1_history = []; best_w2_history = []
 env_names = [env['name'] for env in ENVIRONMENTS]
 trait_names = ["Water", "Energy", "Reproduction"]
 
+# =========================
+# Evolution loop
+# =========================
 for gen in range(GENERATIONS):
+    # evaluate population with blended environments
     fits = [fitness(b) for b in population]
-    avg_fits.append(np.mean(fits)); max_fits.append(np.max(fits))
-    best_brain = population[int(np.argmax(fits))]
+    avg_fits.append(np.mean(fits))
+    max_fits.append(np.max(fits))
+    best_idx = int(np.argmax(fits))
+    best_brain = population[best_idx]
 
+    # record best brain outputs on base environments
     for env_obj in ENVIRONMENTS:
         out, hidden = best_brain.forward(env_obj['inputs'])
         for dim, val in enumerate(out):
             best_outputs_history[env_obj['name']][dim].append(val)
         best_hidden_history[env_obj['name']].append(hidden.copy())
 
+    # save weights for visualization
     best_w1_history.append(best_brain.w1.copy())
     best_w2_history.append(best_brain.w2.copy())
 
+    # selection and mutation
     sorted_idx = sorted(range(len(population)), key=lambda i: fits[i], reverse=True)
     new_pop = [population[i].copy() for i in sorted_idx[:ELITISM]]
     while len(new_pop) < POPULATION_SIZE:
@@ -154,7 +202,7 @@ ax_hid = fig.add_subplot(gs[0, 1])       # right column, row 1
 ax_w1  = fig.add_subplot(gs[1, 1])       # right column, row 2
 ax_w2  = fig.add_subplot(gs[2, 1])       # right column, row 3
 
-# --- Output lines & targets (all 9) ---
+# --- Output lines & targets ---
 lines = {}
 target_lines = {}
 for env_index, env_name in enumerate(env_names):
@@ -178,15 +226,31 @@ ax_out.set_xlabel("Generation")
 ax_out.set_ylabel("Best Brain Output")
 ax_out.set_title("Best Brain Outputs")
 
-# Legend (we’ll move it dynamically in update())
+# Legend 
 legend = ax_out.legend(fontsize=9, loc='upper right', framealpha=0.9)
 
 # --- Environment bands & emojis ---
-for start, end, base_env in env_spans:
-    ax_out.axvspan(start, end, color=env_colors.get(base_env['name'], "#CCC"), alpha=0.15, linewidth=0)
-    center = (start + end)/2
-    ax_out.text(center, -0.06, env_emojis.get(base_env['name'], '?'),
+num_stripes = 20
+for (start, end, base_env_idx) in [(s, e, ENVIRONMENTS.index(b)) for (s, e, b) in env_spans]:
+    base_env = ENVIRONMENTS[base_env_idx]
+    next_env = ENVIRONMENTS[(base_env_idx + 1) % len(ENVIRONMENTS)]
+    for i in range(num_stripes):
+        x0 = start + (end - start) * (i / num_stripes)
+        x1 = start + (end - start) * ((i + 1) / num_stripes)
+        w = cosine_blend((i + 0.5) / num_stripes)
+        c0 = np.array(to_rgb(env_colors[base_env["name"]]))
+        c1 = np.array(to_rgb(env_colors[next_env["name"]]))
+        c = (1 - w) * c0 + w * c1
+        ax_out.axvspan(x0, x1, color=np.clip(c ** 0.7, 0, 1), alpha=0.35, linewidth=0)
+
+    # emoji label at center
+    center = (start + end) / 2
+    ax_out.text(center, -0.06, env_emojis.get(base_env["name"], '?'),
                 transform=ax_out.get_xaxis_transform(), ha='center', va='top', fontsize=16)
+
+                
+
+
 
 # --- Hidden activations ---
 im_hid = ax_hid.imshow(np.zeros((HIDDEN_NEURONS, len(ENVIRONMENTS))), cmap='plasma', aspect='auto')
@@ -218,7 +282,7 @@ def apply_style_to_lines():
         if style_state["markers"]:
             line.set_marker('o'); line.set_markersize(4)
         else:
-            line.set_marker('')  # '' is a valid "no marker" style
+            line.set_marker('')  
     for tline in target_lines.values():
         tline.set_alpha(0.5 if style_state["thin"] else 0.7)
 
