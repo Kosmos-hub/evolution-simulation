@@ -237,11 +237,11 @@ def move_legend_dynamically(start_idx, end_idx):
     if style_state["trail"]:
         window_center = (start_idx + end_idx) / 2
         if window_center < GENERATIONS / 2:
-            # You're looking near the start → move legend to the right
+            # looking near the start → move legend to the right
             legend.set_loc('upper right')
             legend.set_bbox_to_anchor((1.0, 1.0), transform=ax_out.transAxes)
         else:
-            # You're looking near the end → move legend to the left
+            # looking near the end → move legend to the left
             legend.set_loc('upper left')
             legend.set_bbox_to_anchor((0.0, 1.0), transform=ax_out.transAxes)
     else:
