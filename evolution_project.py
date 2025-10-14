@@ -2,31 +2,31 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'Segoe UI Emoji'
-from matplotlib.widgets import Slider, Button
-from matplotlib.patches import Patch
+from matplotlib.widgets import Slider, Button, CheckButtons
 
 # =========================
 # Configurable parameters ^w^
 # =========================
-POPULATION_SIZE = 100       # number of AI "brains" per generation
-GENERATIONS = 200           # total generations
-ELITISM = 2                 # number of top brains that survive unchanged
-MUTATION_RATE = 0.3         # mutation intensity
-TOURNAMENT_SIZE = 5         # selection pool size
-HIDDEN_NEURONS = 6          # hidden layer size
-ENV_TESTS = 5               # how many random env tests per fitness evaluation
+POPULATION_SIZE = 100 # number of AI "brains" per generation
+GENERATIONS = 200 # total generations
+ELITISM = 2 # number of top brains that survive unchanged
+MUTATION_RATE = 0.3 # mutation intensity
+TOURNAMENT_SIZE = 5 # selection pool size
+HIDDEN_NEURONS = 6 # hidden layer size
+ENV_TESTS = 5 # how many random env tests per fitness evaluation
+TRAIL = 20            # default last N generations to show when Trail mode is enabled
 
-# reproducibility
-random.seed(1)
-np.random.seed(1)
+#random seed for reproducibility, remove/comment out for different results each run
+# random.seed(1)
+# np.random.seed(1)
 
 # =========================
 # Environment definitions
 # =========================
 ENVIRONMENTS = [
-    {"name": "Daytime heatwave", "inputs": [1.0, 0.0, 0.0], "target": 0.1},
-    {"name": "Cool night",       "inputs": [0.0, 0.0, 1.0], "target": 0.9},
-    {"name": "Dry drought",      "inputs": [1.0, 1.0, 0.0], "target": 0.3},
+    {"name": "Daytime heatwave", "inputs": [1.0, 0.0, 0.0], "target": [0.4, 0.7, 0.2]},
+    {"name": "Cool night",       "inputs": [0.0, 0.0, 1.0], "target": [0.0, 0.0, 1.0]},
+    {"name": "Dry drought",      "inputs": [1.0, 1.0, 0.0], "target": [0.8, 0.7, 0.0]},
 ]
 
 MIN_DURATION = 10
@@ -58,121 +58,81 @@ env_colors = {
     "Cool night": "#99CCFF",
     "Dry drought": "#FF9999",
 }
-env_emojis = {
-    "Daytime heatwave": "     ☀️",
-    "Cool night": "🌙",
-    "Dry drought": "💧",
-}
+env_emojis = {"Daytime heatwave": "☀️", "Cool night": "🌙", "Dry drought": "💧"}
 
 # =========================
-# Neural network class (Brain)
+# Neural network class 
 # =========================
 class Brain:
-    def __init__(self):
-        # input→hidden, hidden→output weights
+    def __init__(self, output_neurons=3):
+        # input>hidden, hidden>output weights
         self.w1 = np.random.randn(3, HIDDEN_NEURONS)
-        self.w2 = np.random.randn(HIDDEN_NEURONS, 1)
-    
+        self.w2 = np.random.randn(HIDDEN_NEURONS, output_neurons)
     def forward(self, inputs):
         """forward pass: returns output and hidden activations"""
         h = np.tanh(np.dot(inputs, self.w1))
         o = 1 / (1 + np.exp(-np.dot(h, self.w2)))
-        return o[0], h
-    
+        return o, h
     def mutate(self, rate=MUTATION_RATE):
-        """mutate weights slightly to keep evolution spicy"""
+        """mutate weights slightly to keep evolution silly :3 teehee"""
         self.w1 += np.random.randn(*self.w1.shape) * rate
         self.w2 += np.random.randn(*self.w2.shape) * rate
-
     def copy(self):
         """deep copy for elitism / reproduction"""
-        new = Brain()
+        new = Brain(self.w2.shape[1])
         new.w1 = np.copy(self.w1)
         new.w2 = np.copy(self.w2)
         return new
 
 # =========================
-# Environment variation function
-# =========================
-def environment_for_generation(gen):
-    """returns a slightly randomized environment for a given generation"""
-    gen_cursor = 0
-    for base_env, duration in env_schedule:
-        if gen_cursor <= gen - 1 < gen_cursor + duration:
-            varied_inputs = [max(0.0, min(1.0, i + random.uniform(-0.5, 0.5)))
-                             for i in base_env["inputs"]]
-            varied_target = max(0.0, min(1.0, base_env["target"] + random.uniform(-0.3, 0.3)))
-            return {"name": base_env["name"], "inputs": varied_inputs, "target": varied_target}
-        gen_cursor += duration
-    return ENVIRONMENTS[0]
-
-# =========================
-# Fitness function
+# Fitness
 # =========================
 def fitness(brain):
-    """average performance over several randomized environment tests"""
     score = 0
     for _ in range(ENV_TESTS):
         env = random.choice(ENVIRONMENTS)
-        varied_inputs = [max(0.0, min(1.0, i + random.uniform(-0.5,0.5))) for i in env["inputs"]]
-        varied_target = max(0.0, min(1.0, env["target"] + random.uniform(-0.3,0.3)))
+        varied_inputs = [max(0, min(1, i + random.uniform(-0.5,0.5))) for i in env["inputs"]]
         output, _ = brain.forward(varied_inputs)
-        score += 1 - abs(output - varied_target)
+        score += 1 - np.mean([abs(o - t) for o, t in zip(output, env["target"])])
     return score / ENV_TESTS
 
-# =========================
-# Tournament selection
-# =========================
 def tournament_select(population, fitnesses):
-    best = None
-    best_fit = -1
+    best = None; best_fit = -1
     for _ in range(TOURNAMENT_SIZE):
-        idx = random.randrange(len(population))
-        f = fitnesses[idx]
+        idx = random.randrange(len(population)); f = fitnesses[idx]
         if f > best_fit:
-            best_fit = f
-            best = population[idx]
+            best_fit = f; best = population[idx]
     return best
 
 # =========================
-# Initialize population
+# Initialize & evolve
 # =========================
-population = [Brain() for _ in range(POPULATION_SIZE)]
+population = [Brain(len(ENVIRONMENTS[0]["target"])) for _ in range(POPULATION_SIZE)]
 
-# stats tracking
-avg_fits = []
-max_fits = []
-best_outputs_history = {env['name']: [] for env in ENVIRONMENTS}
+avg_fits = []; max_fits = []
+best_outputs_history = {env['name']: [[] for _ in range(len(env['target']))] for env in ENVIRONMENTS}
 best_hidden_history = {env['name']: [] for env in ENVIRONMENTS}
-best_w1_history = []
-best_w2_history = []
+best_w1_history = []; best_w2_history = []
 
 env_names = [env['name'] for env in ENVIRONMENTS]
+trait_names = ["Water", "Energy", "Reproduction"]
 
-# =========================
-# Evolution loop
-# =========================
-for gen in range(1, GENERATIONS + 1):
+for gen in range(GENERATIONS):
     fits = [fitness(b) for b in population]
-    avg_fits.append(np.mean(fits))
-    max_fits.append(np.max(fits))
+    avg_fits.append(np.mean(fits)); max_fits.append(np.max(fits))
+    best_brain = population[int(np.argmax(fits))]
 
-    # pick best brain
-    best_idx = np.argmax(fits)
-    best_brain = population[best_idx]
-
-    # store outputs + hidden activations for visualization
     for env_obj in ENVIRONMENTS:
         out, hidden = best_brain.forward(env_obj['inputs'])
-        best_outputs_history[env_obj['name']].append(out)
+        for dim, val in enumerate(out):
+            best_outputs_history[env_obj['name']][dim].append(val)
         best_hidden_history[env_obj['name']].append(hidden.copy())
-    
+
     best_w1_history.append(best_brain.w1.copy())
     best_w2_history.append(best_brain.w2.copy())
 
-    # reproduce
     sorted_idx = sorted(range(len(population)), key=lambda i: fits[i], reverse=True)
-    new_pop = [population[i].copy() for i in sorted_idx[:ELITISM]]  # keep elite
+    new_pop = [population[i].copy() for i in sorted_idx[:ELITISM]]
     while len(new_pop) < POPULATION_SIZE:
         parent = tournament_select(population, fits).copy()
         parent.mutate(rate=MUTATION_RATE)
@@ -182,81 +142,187 @@ for gen in range(1, GENERATIONS + 1):
 # =========================
 # Visualization
 # =========================
-fig, axes = plt.subplots(2, 2, figsize=(18,10))
-plt.subplots_adjust(bottom=0.25)
-ax_out, ax_hid, ax_w1, ax_w2 = axes.flatten()
+from matplotlib.gridspec import GridSpec
 
-# --- Output lines ---
+# Layout: big main chart on the left, 3 stacked panels on the right
+fig = plt.figure(figsize=(20,10))
+gs = GridSpec(3, 2, figure=fig, width_ratios=[3.0, 1.2], height_ratios=[1,1,1])
+plt.subplots_adjust(bottom=0.25, left=0.18, right=0.96, top=0.92)
+
+ax_out = fig.add_subplot(gs[:, 0])       # spans all rows on left
+ax_hid = fig.add_subplot(gs[0, 1])       # right column, row 1
+ax_w1  = fig.add_subplot(gs[1, 1])       # right column, row 2
+ax_w2  = fig.add_subplot(gs[2, 1])       # right column, row 3
+
+# --- Output lines & targets (all 9) ---
 lines = {}
-for env_name in env_names:
-    line, = ax_out.plot([], [], label=env_name, linewidth=2)
-    lines[env_name] = line
+target_lines = {}
+for env_index, env_name in enumerate(env_names):
+    base_color = np.array(plt.get_cmap("tab10")(env_index))[:3]
+    for dim, trait in enumerate(trait_names):
+        # solid output line
+        line, = ax_out.plot([], [], '-', linewidth=2.2, alpha=1.0,
+                            label=f"{env_name} {trait}", zorder=2)
+        lines[(env_name, dim)] = line
+        # dotted target line on top
+        target_val = ENVIRONMENTS[env_index]["target"][dim]
+        tline, = ax_out.plot(range(GENERATIONS),
+                             [target_val]*GENERATIONS, '--',
+                             color=base_color, linewidth=1.0, alpha=0.6,
+                             zorder=3, label=f"{env_name} {trait} target")
+        target_lines[(env_name, dim)] = tline
+
 ax_out.set_xlim(0, GENERATIONS)
 ax_out.set_ylim(-0.15, 1)
 ax_out.set_xlabel("Generation")
 ax_out.set_ylabel("Best Brain Output")
 ax_out.set_title("Best Brain Outputs")
-ax_out.legend(loc='upper right')
+
+# Legend (we’ll move it dynamically in update())
+legend = ax_out.legend(fontsize=9, loc='upper right', framealpha=0.9)
 
 # --- Environment bands & emojis ---
 for start, end, base_env in env_spans:
-    color = env_colors.get(base_env['name'], "#CCCCCC")
-    ax_out.axvspan(start, end, color=color, alpha=0.15, linewidth=0)
+    ax_out.axvspan(start, end, color=env_colors.get(base_env['name'], "#CCC"), alpha=0.15, linewidth=0)
     center = (start + end)/2
     ax_out.text(center, -0.06, env_emojis.get(base_env['name'], '?'),
-                transform=ax_out.get_xaxis_transform(),
-                ha='center', va='top', fontsize=16)
+                transform=ax_out.get_xaxis_transform(), ha='center', va='top', fontsize=16)
 
-# --- Hidden activations heatmap ---
-im_hid = ax_hid.imshow(np.zeros((HIDDEN_NEURONS, len(ENVIRONMENTS))),
-                       cmap='plasma', aspect='auto')
-ax_hid.set_xticks(range(len(env_names)))
-ax_hid.set_xticklabels(env_names)
-ax_hid.set_yticks(range(HIDDEN_NEURONS))
-ax_hid.set_yticklabels([f'H{i}' for i in range(HIDDEN_NEURONS)])
+# --- Hidden activations ---
+im_hid = ax_hid.imshow(np.zeros((HIDDEN_NEURONS, len(ENVIRONMENTS))), cmap='plasma', aspect='auto')
+ax_hid.set_xticks(range(len(env_names))); ax_hid.set_xticklabels(env_names)
+ax_hid.set_yticks(range(HIDDEN_NEURONS)); ax_hid.set_yticklabels([f'H{i}' for i in range(HIDDEN_NEURONS)])
 ax_hid.set_title("Hidden Neuron Activations")
-cbar_hid = fig.colorbar(im_hid, ax=ax_hid)
+cbar_hid = fig.colorbar(im_hid, ax=ax_hid, fraction=0.046, pad=0.04)
 
-# --- Weights heatmaps ---
+# --- Weight heatmaps ---
 im_w1 = ax_w1.imshow(np.zeros((3,HIDDEN_NEURONS)), vmin=-3, vmax=3, cmap="coolwarm")
-ax_w1.set_title("Input→Hidden Weights")
-ax_w1.set_xlabel("Hidden Neurons")
-ax_w1.set_ylabel("Input Neurons")
-fig.colorbar(im_w1, ax=ax_w1)
+ax_w1.set_title("Input→Hidden Weights"); fig.colorbar(im_w1, ax=ax_w1, fraction=0.046, pad=0.04)
 
-im_w2 = ax_w2.imshow(np.zeros((HIDDEN_NEURONS,1)), vmin=-3, vmax=3, cmap="coolwarm")
-ax_w2.set_title("Hidden→Output Weights")
-ax_w2.set_xlabel("Output Neuron")
-ax_w2.set_ylabel("Hidden Neurons")
-fig.colorbar(im_w2, ax=ax_w2)
+im_w2 = ax_w2.imshow(np.zeros((HIDDEN_NEURONS,len(ENVIRONMENTS[0]["target"]))), vmin=-3, vmax=3, cmap="coolwarm")
+ax_w2.set_title("Hidden→Output Weights"); fig.colorbar(im_w2, ax=ax_w2, fraction=0.046, pad=0.04)
 
-# --- Slider & update function ---
-ax_slider = plt.axes([0.15, 0.1, 0.65, 0.03])
+# Slider (wider because we shifted layout)
+ax_slider = plt.axes([0.22, 0.08, 0.58, 0.04])
 slider = Slider(ax_slider, 'Generation', 0, GENERATIONS-1, valinit=GENERATIONS-1, valstep=1)
 
+# ===== Style state (reuse your existing dict if present) =====
+style_state = {"thin": False, "markers": False, "trail": False}
+
+def apply_style_to_lines():
+    for line in lines.values():
+        if style_state["thin"]:
+            line.set_linewidth(1.5); line.set_alpha(0.7)
+        else:
+            line.set_linewidth(2.2); line.set_alpha(1.0)
+        if style_state["markers"]:
+            line.set_marker('o'); line.set_markersize(4)
+        else:
+            line.set_marker('')  # '' is a valid "no marker" style
+    for tline in target_lines.values():
+        tline.set_alpha(0.5 if style_state["thin"] else 0.7)
+
+def compute_x_range_for_gen(gen):
+    if style_state["trail"]:
+        start_idx = max(0, gen - TRAIL)
+    else:
+        start_idx = 0
+    return start_idx, gen
+
+def move_legend_dynamically(start_idx, end_idx):
+    """
+    In Trail mode, move the legend *away* from the visible window
+    so it never covers what you're inspecting.
+    """
+    if style_state["trail"]:
+        window_center = (start_idx + end_idx) / 2
+        if window_center < GENERATIONS / 2:
+            # You're looking near the start → move legend to the right
+            legend.set_loc('upper right')
+            legend.set_bbox_to_anchor((1.0, 1.0), transform=ax_out.transAxes)
+        else:
+            # You're looking near the end → move legend to the left
+            legend.set_loc('upper left')
+            legend.set_bbox_to_anchor((0.0, 1.0), transform=ax_out.transAxes)
+    else:
+        # Normal mode — fixed to upper right
+        legend.set_loc('upper right')
+        legend.set_bbox_to_anchor((1.0, 1.0), transform=ax_out.transAxes)
+
+# Update function
 def update(val):
     gen = int(slider.val)
-    # outputs
+    start_idx, end_idx = compute_x_range_for_gen(gen)
+
+    # outputs (respect trail window)
     for env_name in env_names:
-        ydata = best_outputs_history[env_name][:gen+1]
-        xdata = list(range(len(ydata)))
-        lines[env_name].set_data(xdata, ydata)
-    # hidden activations
+        for dim in range(len(trait_names)):
+            ydata = best_outputs_history[env_name][dim][start_idx:end_idx+1]
+            xdata = list(range(start_idx, end_idx+1))
+            lines[(env_name, dim)].set_data(xdata, ydata)
+
+    # hidden
     hid_data = np.array([best_hidden_history[env][gen] for env in env_names]).T
     im_hid.set_data(hid_data)
     im_hid.set_clim(hid_data.min(), hid_data.max())
     cbar_hid.update_normal(im_hid)
+
     # weights
     im_w1.set_data(best_w1_history[gen])
     im_w2.set_data(best_w2_history[gen])
+
+    # styles + legend position
+    apply_style_to_lines()
+    move_legend_dynamically(start_idx, end_idx)
+
     fig.canvas.draw_idle()
 
 slider.on_changed(update)
 
 # --- Reset button ---
-ax_reset = plt.axes([0.83, 0.1, 0.08, 0.04])
+ax_reset = plt.axes([0.81, 0.08, 0.08, 0.04])
 Button(ax_reset, 'Reset').on_clicked(lambda event: slider.reset())
 
-# initialize visualization
+# ===== CheckButtons: STYLE =====
+rax_style = plt.axes([0.02, 0.60, 0.14, 0.25])  # left side
+style_labels = ["Thin/Transparent", "Markers", "Trail mode"]
+style_vis = [style_state["thin"], style_state["markers"], style_state["trail"]]
+style_check = CheckButtons(rax_style, style_labels, style_vis)
+rax_style.set_title("Style")
+
+def style_toggle(label):
+    if label == "Thin/Transparent":
+        style_state["thin"] = not style_state["thin"]
+    elif label == "Markers":
+        style_state["markers"] = not style_state["markers"]
+    elif label == "Trail mode":
+        style_state["trail"] = not style_state["trail"]
+    update(slider.val)
+
+style_check.on_clicked(style_toggle)
+
+# ===== CheckButtons: LINES (per Env×Trait) =====
+rax_lines = plt.axes([0.02, 0.18, 0.14, 0.35])
+line_labels = [f"{env}|{trait}" for env in env_names for trait in trait_names]  # safe delimiter
+line_visibility = [True]*len(line_labels)
+line_check = CheckButtons(rax_lines, line_labels, line_visibility)
+rax_lines.set_title("Show/Hide Lines")
+
+def line_toggle(label):
+    # parse "Env|Trait"
+    env, trait = label.split("|", 1)
+    env = env.strip()
+    trait = trait.strip()
+    dim = trait_names.index(trait)
+    key = (env, dim)
+    visible = not lines[key].get_visible()
+    lines[key].set_visible(visible)
+    # keep target line in sync
+    target_lines[key].set_visible(visible)
+    fig.canvas.draw_idle()
+
+line_check.on_clicked(line_toggle)
+
+# initialize
 update(GENERATIONS-1)
 plt.show()
