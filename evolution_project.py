@@ -5,29 +5,34 @@ plt.rcParams['font.family'] = 'Segoe UI Emoji'
 from matplotlib.widgets import Slider, Button
 from matplotlib.patches import Patch
 
-# === Configurable parameters ===
-POPULATION_SIZE = 100 
-GENERATIONS = 200
-ELITISM = 2
-MUTATION_RATE = 0.3
-TOURNAMENT_SIZE = 5
-HIDDEN_NEURONS = 6
-ENV_TESTS = 5
+# =========================
+# Configurable parameters ^w^
+# =========================
+POPULATION_SIZE = 100       # number of AI "brains" per generation
+GENERATIONS = 200           # total generations
+ELITISM = 2                 # number of top brains that survive unchanged
+MUTATION_RATE = 0.3         # mutation intensity
+TOURNAMENT_SIZE = 5         # selection pool size
+HIDDEN_NEURONS = 6          # hidden layer size
+ENV_TESTS = 5               # how many random env tests per fitness evaluation
 
-# disabled for randomness XD, remove "#" to keep same seed
-# random.seed(1)
-# np.random.seed(1)
+# reproducibility
+random.seed(1)
+np.random.seed(1)
 
-# === Environments ===
+# =========================
+# Environment definitions
+# =========================
 ENVIRONMENTS = [
     {"name": "Daytime heatwave", "inputs": [1.0, 0.0, 0.0], "target": 0.1},
     {"name": "Cool night",       "inputs": [0.0, 0.0, 1.0], "target": 0.9},
     {"name": "Dry drought",      "inputs": [1.0, 1.0, 0.0], "target": 0.3},
 ]
 
-MIN_DURATION = 10 
+MIN_DURATION = 10
 MAX_DURATION = 30
 
+# generate environment schedule per generation
 env_schedule = []
 gen_count = 0
 while gen_count < GENERATIONS:
@@ -38,7 +43,7 @@ while gen_count < GENERATIONS:
         if gen_count >= GENERATIONS:
             break
 
-# Build spans for background plotting
+# for plotting background bands
 env_spans = []
 cursor = 0
 for base_env, duration in env_schedule:
@@ -47,40 +52,50 @@ for base_env, duration in env_schedule:
     env_spans.append((start, end, base_env))
     cursor += duration
 
+# visual helpers
 env_colors = {
     "Daytime heatwave": "#FFDD99",
     "Cool night": "#99CCFF",
     "Dry drought": "#FF9999",
 }
 env_emojis = {
-    "Daytime heatwave": "☀️",
+    "Daytime heatwave": "     ☀️",
     "Cool night": "🌙",
     "Dry drought": "💧",
 }
 
-# === Neural network ===
+# =========================
+# Neural network class (Brain)
+# =========================
 class Brain:
     def __init__(self):
+        # input→hidden, hidden→output weights
         self.w1 = np.random.randn(3, HIDDEN_NEURONS)
         self.w2 = np.random.randn(HIDDEN_NEURONS, 1)
     
     def forward(self, inputs):
+        """forward pass: returns output and hidden activations"""
         h = np.tanh(np.dot(inputs, self.w1))
         o = 1 / (1 + np.exp(-np.dot(h, self.w2)))
         return o[0], h
     
     def mutate(self, rate=MUTATION_RATE):
+        """mutate weights slightly to keep evolution spicy"""
         self.w1 += np.random.randn(*self.w1.shape) * rate
         self.w2 += np.random.randn(*self.w2.shape) * rate
 
     def copy(self):
+        """deep copy for elitism / reproduction"""
         new = Brain()
         new.w1 = np.copy(self.w1)
         new.w2 = np.copy(self.w2)
         return new
 
-# === Environment variation for generation ===
+# =========================
+# Environment variation function
+# =========================
 def environment_for_generation(gen):
+    """returns a slightly randomized environment for a given generation"""
     gen_cursor = 0
     for base_env, duration in env_schedule:
         if gen_cursor <= gen - 1 < gen_cursor + duration:
@@ -91,8 +106,11 @@ def environment_for_generation(gen):
         gen_cursor += duration
     return ENVIRONMENTS[0]
 
-# === Fitness ===
+# =========================
+# Fitness function
+# =========================
 def fitness(brain):
+    """average performance over several randomized environment tests"""
     score = 0
     for _ in range(ENV_TESTS):
         env = random.choice(ENVIRONMENTS)
@@ -102,6 +120,9 @@ def fitness(brain):
         score += 1 - abs(output - varied_target)
     return score / ENV_TESTS
 
+# =========================
+# Tournament selection
+# =========================
 def tournament_select(population, fitnesses):
     best = None
     best_fit = -1
@@ -113,8 +134,12 @@ def tournament_select(population, fitnesses):
             best = population[idx]
     return best
 
-# === Initialize population and stats ===
+# =========================
+# Initialize population
+# =========================
 population = [Brain() for _ in range(POPULATION_SIZE)]
+
+# stats tracking
 avg_fits = []
 max_fits = []
 best_outputs_history = {env['name']: [] for env in ENVIRONMENTS}
@@ -124,15 +149,19 @@ best_w2_history = []
 
 env_names = [env['name'] for env in ENVIRONMENTS]
 
-# === Evolution loop ===
+# =========================
+# Evolution loop
+# =========================
 for gen in range(1, GENERATIONS + 1):
     fits = [fitness(b) for b in population]
     avg_fits.append(np.mean(fits))
     max_fits.append(np.max(fits))
 
+    # pick best brain
     best_idx = np.argmax(fits)
     best_brain = population[best_idx]
 
+    # store outputs + hidden activations for visualization
     for env_obj in ENVIRONMENTS:
         out, hidden = best_brain.forward(env_obj['inputs'])
         best_outputs_history[env_obj['name']].append(out)
@@ -141,21 +170,23 @@ for gen in range(1, GENERATIONS + 1):
     best_w1_history.append(best_brain.w1.copy())
     best_w2_history.append(best_brain.w2.copy())
 
-    # Evolve
+    # reproduce
     sorted_idx = sorted(range(len(population)), key=lambda i: fits[i], reverse=True)
-    new_pop = [population[i].copy() for i in sorted_idx[:ELITISM]]
+    new_pop = [population[i].copy() for i in sorted_idx[:ELITISM]]  # keep elite
     while len(new_pop) < POPULATION_SIZE:
         parent = tournament_select(population, fits).copy()
         parent.mutate(rate=MUTATION_RATE)
         new_pop.append(parent)
     population = new_pop
 
-# === Visualization ===
+# =========================
+# Visualization
+# =========================
 fig, axes = plt.subplots(2, 2, figsize=(18,10))
 plt.subplots_adjust(bottom=0.25)
 ax_out, ax_hid, ax_w1, ax_w2 = axes.flatten()
 
-# Output lines
+# --- Output lines ---
 lines = {}
 for env_name in env_names:
     line, = ax_out.plot([], [], label=env_name, linewidth=2)
@@ -167,7 +198,7 @@ ax_out.set_ylabel("Best Brain Output")
 ax_out.set_title("Best Brain Outputs")
 ax_out.legend(loc='upper right')
 
-# Environment bands + emojis
+# --- Environment bands & emojis ---
 for start, end, base_env in env_spans:
     color = env_colors.get(base_env['name'], "#CCCCCC")
     ax_out.axvspan(start, end, color=color, alpha=0.15, linewidth=0)
@@ -176,7 +207,7 @@ for start, end, base_env in env_spans:
                 transform=ax_out.get_xaxis_transform(),
                 ha='center', va='top', fontsize=16)
 
-# Hidden activations heatmap (dynamic)
+# --- Hidden activations heatmap ---
 im_hid = ax_hid.imshow(np.zeros((HIDDEN_NEURONS, len(ENVIRONMENTS))),
                        cmap='plasma', aspect='auto')
 ax_hid.set_xticks(range(len(env_names)))
@@ -186,7 +217,7 @@ ax_hid.set_yticklabels([f'H{i}' for i in range(HIDDEN_NEURONS)])
 ax_hid.set_title("Hidden Neuron Activations")
 cbar_hid = fig.colorbar(im_hid, ax=ax_hid)
 
-# Weight heatmaps
+# --- Weights heatmaps ---
 im_w1 = ax_w1.imshow(np.zeros((3,HIDDEN_NEURONS)), vmin=-3, vmax=3, cmap="coolwarm")
 ax_w1.set_title("Input→Hidden Weights")
 ax_w1.set_xlabel("Hidden Neurons")
@@ -199,7 +230,10 @@ ax_w2.set_xlabel("Output Neuron")
 ax_w2.set_ylabel("Hidden Neurons")
 fig.colorbar(im_w2, ax=ax_w2)
 
-# === Update function ===
+# --- Slider & update function ---
+ax_slider = plt.axes([0.15, 0.1, 0.65, 0.03])
+slider = Slider(ax_slider, 'Generation', 0, GENERATIONS-1, valinit=GENERATIONS-1, valstep=1)
+
 def update(val):
     gen = int(slider.val)
     # outputs
@@ -217,15 +251,12 @@ def update(val):
     im_w2.set_data(best_w2_history[gen])
     fig.canvas.draw_idle()
 
-# Slider for generation
-ax_slider = plt.axes([0.15, 0.1, 0.65, 0.03])
-slider = Slider(ax_slider, 'Generation', 0, GENERATIONS-1, valinit=GENERATIONS-1, valstep=1)
 slider.on_changed(update)
 
-# Reset button
+# --- Reset button ---
 ax_reset = plt.axes([0.83, 0.1, 0.08, 0.04])
 Button(ax_reset, 'Reset').on_clicked(lambda event: slider.reset())
 
-# Initialize visualization
+# initialize visualization
 update(GENERATIONS-1)
 plt.show()
