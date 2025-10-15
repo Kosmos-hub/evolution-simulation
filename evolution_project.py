@@ -4,17 +4,18 @@ import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'Segoe UI Emoji'
 from matplotlib.widgets import Slider, Button, CheckButtons
 from matplotlib.colors import to_rgb
+from matplotlib import colors
 
 # =========================
 # Configurable parameters ^w^
 # =========================
-POPULATION_SIZE = 100         # number of AI "brains" per generation
-GENERATIONS = 500             # total generations
-ELITISM = 2                   # number of top brains that survive unchanged
-MUTATION_RATE = 0.3           # mutation chance
-TOURNAMENT_SIZE = 5           # selection pool size
+POPULATION_SIZE = 250         # number of AI "brains" per generation
+GENERATIONS = 600             # total generations
+ELITISM = 8                   # number of top brains that survive unchanged
+MUTATION_RATE = 0.4           # mutation chance
+TOURNAMENT_SIZE = 15           # selection pool size
 HIDDEN_NEURONS = 6            # hidden layer size
-ENV_TESTS = 5                 # how many random env tests per fitness evaluation
+ENV_TESTS = 9                 # how many random env tests per fitness evaluation
 TRAIL = 50                    # default last N generations to show when Trail mode is enabled
 
 #random seed for reproducibility, remove/comment out for different results each run
@@ -84,25 +85,13 @@ class Brain:
 # =========================
 # Fitness
 # =========================
-def fitness(brain):
-    score = 0
-    penalty = 0
-    for _ in range(ENV_TESTS):
-        g = np.random.uniform(0, GENERATIONS - 1)
-        e = env_at_generation(g)
-        varied_inputs = [max(0, min(1, x + random.uniform(-0.1, 0.1))) for x in e["inputs"]]
-        output, _ = brain.forward(varied_inputs)
-
-        # Base accuracy component
-        diff = [abs(o - t) for o, t in zip(output, e["target"])]
-        score += 1 - np.mean(diff)
-
-        # Punish for strong outputs where the target is near 0
-        for o, t in zip(output, e["target"]):
-            if t < 0.05 and o > 0.3:
-                penalty += (o - t) * 0.5
-
-    return max(0.0, (score / ENV_TESTS) - penalty)
+def fitness(brain, env):
+    varied_inputs = [max(0, min(1, x + random.uniform(-0.1, 0.1))) for x in env["inputs"]]
+    output, _ = brain.forward(varied_inputs)
+    diff = [abs(o - t) for o, t in zip(output, env["target"])]
+    score = 1 - np.mean(diff)
+    penalty = sum((o - t) * 0.5 for o, t in zip(output, env["target"]) if t < 0.05 and o > 0.3)
+    return max(0.0, score - penalty)
 
 
 def tournament_select(population, fitnesses):
@@ -141,6 +130,15 @@ best_outputs_history = {env['name']: [[] for _ in range(len(env['target']))] for
 best_hidden_history = {env['name']: [] for env in ENVIRONMENTS}
 best_w1_history, best_w2_history = [], []
 
+def crossover(parent1, parent2):
+    child = parent1.copy()
+    # halfway mix between parents
+    mask_w1 = np.random.rand(*parent1.w1.shape) < 0.5
+    mask_w2 = np.random.rand(*parent1.w2.shape) < 0.5
+    child.w1 = np.where(mask_w1, parent1.w1, parent2.w1)
+    child.w2 = np.where(mask_w2, parent1.w2, parent2.w2)
+    return child
+
 # Top K brains history
 TOP_K = 5
 brains_outputs_history = [
@@ -151,8 +149,13 @@ brains_outputs_history = [
 env_names = [env['name'] for env in ENVIRONMENTS]
 trait_names = ["Water", "Energy", "Reproduction"]
 
+#=========================
+# Evolution loop :3
+#=========================
+
 for gen in range(GENERATIONS):
-    fits = [fitness(b) for b in population]
+    current_env = env_at_generation(gen)
+    fits = [fitness(b, current_env) for b in population]
     avg_fits.append(np.mean(fits))
     max_fits.append(np.max(fits))
 
@@ -178,10 +181,37 @@ for gen in range(GENERATIONS):
 
     new_pop = [population[i].copy() for i in sorted_idx[:ELITISM]]
     while len(new_pop) < POPULATION_SIZE:
-        parent = tournament_select(population, fits).copy()
-        parent.mutate()
-        new_pop.append(parent)
-    population = new_pop
+        p1 = tournament_select(population, fits)
+        p2 = tournament_select(population, fits)
+        child = crossover(p1, p2)
+        child.mutate()
+        new_pop.append(child)
+
+
+# compute trait stability of best brain outputs
+stability = []
+for gen in range(GENERATIONS):
+    vals = []
+    for env in ENVIRONMENTS:
+        # take the outputs of the best brain for this generation only
+        for dim_data in best_outputs_history[env["name"]]:
+            vals.append(dim_data[gen])
+    stability.append(np.std(vals))
+
+# compute correlation history of best brain traits across environments
+corr_history = []
+for gen in range(GENERATIONS):
+    data = []
+    for env in ENVIRONMENTS:
+        data.append([best_outputs_history[env["name"]][i][gen] for i in range(len(trait_names))])
+    data = np.array(data)
+    corr = np.corrcoef(data.T)
+    corr_history.append(corr)
+
+def add_env_bands(ax, alpha=0.07):
+    for (start, end, base_env) in env_spans:
+        ax.axvspan(start, end, color=env_colors[base_env["name"]], alpha=alpha, zorder=-5)
+
 
 # =========================
 # Visualization
@@ -189,13 +219,20 @@ for gen in range(GENERATIONS):
 from matplotlib.gridspec import GridSpec
 
 fig = plt.figure(figsize=(20,10))
-gs = GridSpec(3, 2, figure=fig, width_ratios=[3.0, 1.2], height_ratios=[1,1,1])
-plt.subplots_adjust(bottom=0.25, left=0.18, right=0.96, top=0.92)
+gs = GridSpec(
+    5, 2, figure=fig,
+    width_ratios=[3.0, 1.2],
+    height_ratios=[0.9, 1.0, 0.8, 1.3, 1.0]
+)
+plt.subplots_adjust(bottom=0.25, left=0.18, right=0.96, top=0.92, hspace=0.55)
 
 ax_out = fig.add_subplot(gs[:, 0])
-ax_hid = fig.add_subplot(gs[0, 1])
-ax_w1  = fig.add_subplot(gs[1, 1])
-ax_w2  = fig.add_subplot(gs[2, 1])
+ax_hid = fig.add_subplot(gs[0, 1])     # top-right: activations
+ax_corr = fig.add_subplot(gs[1, 1])    # small middle-right: correlation
+ax_fit  = fig.add_subplot(gs[3:, 1])   # bottom-right: fitness/stability
+add_env_bands(ax_fit, alpha=0.07)
+add_env_bands(ax_corr, alpha=0.10)
+
 
 lines, target_lines, base_colors = {}, {}, {}
 
@@ -302,11 +339,56 @@ ax_hid.set_title("Hidden Neuron Activations")
 im_hid.set_clim(-1, 1)
 fig.colorbar(im_hid, ax=ax_hid, fraction=0.046, pad=0.04)
 
-# --- Weight heatmaps ---
-im_w1 = ax_w1.imshow(np.zeros((3,HIDDEN_NEURONS)), vmin=-3, vmax=3, cmap="coolwarm")
-ax_w1.set_title("Input→Hidden Weights"); fig.colorbar(im_w1, ax=ax_w1, fraction=0.046, pad=0.04)
-im_w2 = ax_w2.imshow(np.zeros((HIDDEN_NEURONS,len(ENVIRONMENTS[0]["target"]))), vmin=-3, vmax=3, cmap="coolwarm")
-ax_w2.set_title("Hidden→Output Weights"); fig.colorbar(im_w2, ax=ax_w2, fraction=0.046, pad=0.04)
+# --- Fitness history chart ---
+ax_fit.plot(range(GENERATIONS), avg_fits, label='Average Fitness', color='dodgerblue', linewidth=1.5)
+ax_fit.plot(range(GENERATIONS), max_fits, label='Max Fitness', color='crimson', linewidth=1.8)
+ax_fit.set_title("Population Fitness")
+ax_fit.set_xlabel("Generation")
+ax_fit.set_ylabel("Fitness")
+ax_fit.set_xlim(0, GENERATIONS)
+ax_fit.set_ylim(0, 1)
+ax_fit.legend(fontsize=8)
+
+# --- Best brain output stability ---
+ax_stab = ax_fit.twinx()
+
+# simple rolling mean (window=7) to reduce jitter
+win = 7
+kernel = np.ones(win) / win
+stab_smooth = np.convolve(stability, kernel, mode="same")
+
+ax_stab.plot(range(GENERATIONS), stab_smooth, color='purple', linewidth=1.5, alpha=0.9, label='Stability (std dev)')
+ax_stab.set_ylabel("Std Dev", color='purple')
+ax_stab.tick_params(axis='y', labelcolor='purple')
+
+# center colors at 0 for symmetric red/blue
+norm0 = colors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
+im_corr = ax_corr.imshow(np.zeros((3, 3)), norm=norm0, cmap="coolwarm")
+
+ax_corr.set_title("Trait Correlation (Best Brain)")
+ax_corr.set_xticks(range(len(trait_names))); ax_corr.set_xticklabels(trait_names)
+ax_corr.set_yticks(range(len(trait_names))); ax_corr.set_yticklabels(trait_names)
+# place colorbar neatly to the right of the correlation plot
+cbar_ax = fig.add_axes([ax_corr.get_position().x1 + 0.012,  # slight offset right
+                        ax_corr.get_position().y0,
+                        0.012,  # narrow width
+                        ax_corr.get_position().height])
+fig.colorbar(im_corr, cax=cbar_ax)
+
+# labels inside the heatmap
+corr_texts = []
+def draw_corr_labels(mat):
+    # clear old labels
+    while corr_texts:
+        corr_texts.pop().remove()
+    # write numbers (skip diagonal)
+    for i in range(mat.shape[0]):
+        for j in range(mat.shape[1]):
+            if i == j:  # dull the diagonal
+                continue
+            t = ax_corr.text(j, i, f"{mat[i, j]:.2f}",
+                             ha="center", va="center", fontsize=8, color="black")
+            corr_texts.append(t)
 
 # --- Style controls ---
 style_state = {"thin": False, "markers": False, "trail": False, "filter_env": False}
@@ -332,14 +414,12 @@ def apply_environment_filter(current_env_name):
 def compute_x_range_for_gen(gen):
     return (max(0, gen - TRAIL) if style_state["trail"] else 0, gen)
 
-def move_legend_dynamically(start_idx, end_idx):
-    if style_state["trail"]:
-        if (start_idx + end_idx) / 2 < GENERATIONS / 2:
-            legend.set_loc('upper right')
-        else:
-            legend.set_loc('upper left')
-    else:
+def move_legend_dynamically(gen):
+    if gen < GENERATIONS / 2:
         legend.set_loc('upper right')
+    else:
+        legend.set_loc('upper left')
+
 
 # --- new trait toggles setup ---
 rax_style = plt.axes([0.02, 0.63, 0.10, 0.26])
@@ -403,6 +483,20 @@ for i, c in enumerate(trait_checks):
 
 brain_check.on_clicked(brains_toggle)
 
+# --- auto-highlight current environment region ---
+highlight_patch = ax_out.axvspan(0, 0, color='white', alpha=0.12, zorder=8)
+
+def update_highlight(gen):
+    # remove old patch and draw a new one
+    global highlight_patch
+    highlight_patch.remove()
+    for (start, end, base_env) in env_spans:
+        if start <= gen < end:
+            highlight_patch = ax_out.axvspan(start, end,
+                                             color=env_colors[base_env["name"]],
+                                             alpha=0.18, zorder=8)
+            break
+
 # --- Slider and update ---
 def update(val):
     gen = int(slider.val)
@@ -418,10 +512,15 @@ def update(val):
                 lines[(k, env_name, dim)].set_data(xdata, ydata)
     hid_data = np.array([best_hidden_history[env][gen] for env in env_names]).T
     im_hid.set_data(hid_data)
-    im_w1.set_data(best_w1_history[gen])
-    im_w2.set_data(best_w2_history[gen])
+
+    # mask diagonal so it's visually de-emphasized
+    mat = corr_history[gen].copy()
+    mat = np.ma.array(mat, mask=np.eye(mat.shape[0], dtype=bool))
+    im_corr.set_data(mat)
+    draw_corr_labels(corr_history[gen])
     apply_style_to_lines()
-    move_legend_dynamically(start_idx, end_idx)
+    move_legend_dynamically(gen)
+    update_highlight(gen)
     fig.canvas.draw_idle()
 
 ax_slider = plt.axes([0.22, 0.08, 0.58, 0.04])
@@ -429,6 +528,21 @@ slider = Slider(ax_slider, 'Generation', 0, GENERATIONS-1, valinit=GENERATIONS-1
 slider.on_changed(update)
 ax_reset = plt.axes([0.81, 0.08, 0.08, 0.04])
 Button(ax_reset, 'Reset').on_clicked(lambda e: slider.reset())
+
+# --- Snapshot button ---
+ax_snap = plt.axes([0.90, 0.08, 0.08, 0.04])
+btn_snap = Button(ax_snap, 'Snapshot')
+
+def save_snapshot(event):
+    gen = int(slider.val)
+    # get current env name
+    env_name = env_at_generation(gen)["name"].replace(" ", "_")
+    filename = f"evolution_snapshot_gen{gen:03d}_{env_name}.png"
+    fig.savefig(filename, dpi=200, bbox_inches='tight')
+    print(f"Snapshot saved as {filename}")
+
+btn_snap.on_clicked(save_snapshot)
+
 
 for i, vis in enumerate(brain_visibility):
     set_brain_visibility(i, vis)
