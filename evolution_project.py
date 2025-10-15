@@ -9,13 +9,13 @@ from matplotlib.colors import to_rgb
 # Configurable parameters ^w^
 # =========================
 POPULATION_SIZE = 100         # number of AI "brains" per generation
-GENERATIONS = 200             # total generations
+GENERATIONS = 500             # total generations
 ELITISM = 2                   # number of top brains that survive unchanged
 MUTATION_RATE = 0.3           # mutation chance
 TOURNAMENT_SIZE = 5           # selection pool size
 HIDDEN_NEURONS = 6            # hidden layer size
 ENV_TESTS = 5                 # how many random env tests per fitness evaluation
-TRAIL = 20                    # default last N generations to show when Trail mode is enabled
+TRAIL = 50                    # default last N generations to show when Trail mode is enabled
 
 #random seed for reproducibility, remove/comment out for different results each run
 # random.seed(1)
@@ -28,10 +28,11 @@ ENVIRONMENTS = [
     {"name": "Daytime heatwave", "inputs": [1.0, 0.0, 0.0], "target": [0.4, 0.7, 0.2]},
     {"name": "Cool night",       "inputs": [0.0, 0.0, 1.0], "target": [0.0, 0.0, 1.0]},
     {"name": "Dry drought",      "inputs": [1.0, 1.0, 0.0], "target": [0.8, 0.7, 0.0]},
+    # trait outputs: [water retention, energy effiency, reproduction]
 ]
 
-MIN_DURATION = 20
-MAX_DURATION = 40
+MIN_DURATION = 50
+MAX_DURATION = 100
 
 env_schedule = []
 gen_count = 0
@@ -231,7 +232,7 @@ for env_index, env_name in enumerate(env_names):
         target_lines[(env_name, dim)] = tline
 
 ax_out.set_xlim(0, GENERATIONS)
-ax_out.set_ylim(-0.15, 1)
+ax_out.set_ylim(0, 1)
 ax_out.set_xlabel("Generation")
 ax_out.set_ylabel("Trait Output")
 ax_out.set_title("Top 5 Brain Outputs")
@@ -258,18 +259,12 @@ for ch in range(3):
     bg[0, :, ch] = gaussian_filter1d(bg[0, :, ch], sigma=3)
 
 # draw as background
-ax_out.imshow(bg, extent=[0, GENERATIONS, -0.15, 1],
+ax_out.imshow(bg, extent=[0, GENERATIONS, 0, 1],
               aspect='auto', alpha=0.25, origin='lower', zorder=0)
 
-# --- subtle white grid overlay ---
-for x in range(0, GENERATIONS, 10):  # vertical lines every 10 generations
-    ax_out.axvline(x, color='white', linewidth=0.4, alpha=0.12, zorder=1)
-for y in np.arange(0, 1.05, 0.1):   # horizontal lines every 0.1
-    ax_out.axhline(y, color='white', linewidth=0.4, alpha=0.12, zorder=1)
-
-# clean labels and dividers
+# clean labels and green dividers
 for (start, end, base_env) in env_spans:
-    ax_out.axvline(start, color='k', linewidth=0.8, alpha=0.08)
+    ax_out.axvline(start, color=(0, 0.7, 0, 0.6), linewidth=1.1, zorder=9)  # bright semi-transparent green
     mid = (start + end) / 2
     ax_out.text(mid, -0.09, base_env["name"],
                 transform=ax_out.get_xaxis_transform(),
@@ -439,4 +434,20 @@ for i, vis in enumerate(brain_visibility):
     set_brain_visibility(i, vis)
 
 update(GENERATIONS-1)
+
+# --- subtle dotted grid overlay ---
+for gx in np.arange(0, GENERATIONS + 1, 10):
+    ax_out.plot([gx, gx], [0, 1],
+                color=(0, 0, 0, 0.45),
+                linewidth=0.6,
+                linestyle=(0, (1.5, 3.5)),
+                zorder=10)
+
+for gy in np.arange(0, 1.05, 0.1):
+    ax_out.plot([0, GENERATIONS], [gy, gy],
+                color=(0, 0, 0, 0.45),
+                linewidth=0.6,
+                linestyle=(0, (1.5, 3.5)),
+                zorder=10)
+
 plt.show()
