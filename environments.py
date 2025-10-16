@@ -3,9 +3,9 @@ import random
 # =========================
 # Configurable environment definitions
 # =========================
-GENERATIONS = 1000
-MIN_DURATION = 100
-MAX_DURATION = 200
+GENERATIONS = 200
+MIN_DURATION = 20
+MAX_DURATION = 40
 
 ENVIRONMENTS = [
     {"name": "Daytime heatwave", "inputs": [1.0, 0.0, 0.0], "target": [0.4, 0.7, 0.2]},
